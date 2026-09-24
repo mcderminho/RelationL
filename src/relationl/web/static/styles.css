@@ -112,14 +112,36 @@ body {
 }
 
 .wordmark {
-  font-weight: 620;
-  font-size: 14px;
-  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
   margin-right: 2px;
+  color: inherit;
+  text-decoration: none;
 }
 
-.wordmark span {
-  color: var(--accent);
+/* The logo is inlined rather than linked so the page's own tokens drive it,
+   which keeps it correct in both themes without a second file. */
+.logo {
+  display: block;
+  width: auto;
+  height: 19px;
+}
+
+.logo-ink {
+  fill: var(--text);
+}
+
+.logo-mark {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+
+.wordmark:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 2px;
 }
 
 .bar-stats {

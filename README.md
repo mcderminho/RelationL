@@ -1,6 +1,13 @@
-# RelationL
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mcderminho/relationl/main/assets/wordmark-dark.svg">
+    <img alt="RelationL" src="https://raw.githubusercontent.com/mcderminho/relationl/main/assets/wordmark-light.svg" width="340">
+  </picture>
+</p>
 
-**Recover the join graph of a data platform from the code that defines it.**
+<p align="center">
+  <strong>Recover the join graph of a data platform from the code that defines it.</strong>
+</p>
 
 RelationL reads SQL, PySpark, Jupyter notebooks and text files, works out which
 *physical tables* are being joined and on what conditions, and writes the result
@@ -341,6 +348,14 @@ uv run pytest
 uv run ruff check .
 ```
 
+The logo is generated, not hand-drawn. `assets/build_logo.py` outlines the
+wordmark from DejaVu Sans and draws the L as a crow's-foot relationship, then
+writes every SVG and PNG variant plus the app's favicon:
+
+```bash
+uv run python assets/build_logo.py
+```
+
 The test corpus in `tests/fixtures/` deliberately contains the same joins
 expressed as SQL, PySpark and a notebook; `test_parity.py` asserts they produce
 identical conditions. It also contains retired joins in every comment style,
@@ -348,4 +363,5 @@ which `test_comments.py` and the end-to-end scan assert never reach the graph.
 
 ## Licence
 
-MIT.
+MIT. The logo embeds outlines from DejaVu Sans, whose licence is in
+`assets/DEJAVU-LICENSE.txt`.

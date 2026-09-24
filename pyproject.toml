@@ -53,7 +53,14 @@ Issues = "https://github.com/mcderminho/relationl/issues"
 packages = ["src/relationl"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/relationl", "tests", "README.md", "LICENSE", "relationl.example.yaml"]
+include = [
+    "src/relationl",
+    "tests",
+    "assets",
+    "README.md",
+    "LICENSE",
+    "relationl.example.yaml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

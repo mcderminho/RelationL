@@ -36,9 +36,16 @@ class TestPages:
         assert response.status_code == 200
         assert "RelationL" in response.text
 
-    @pytest.mark.parametrize("path", ["/static/styles.css", "/static/app.js"])
+    @pytest.mark.parametrize(
+        "path",
+        ["/static/styles.css", "/static/app.js", "/static/model.js", "/static/favicon.svg"],
+    )
     def test_assets_are_served(self, client, path):
         assert client.get(path).status_code == 200
+
+    def test_logo_is_inlined_so_it_follows_the_theme(self, client):
+        body = client.get("/").text
+        assert "logo-ink" in body and "logo-mark" in body
 
     def test_no_external_requests_in_the_frontend(self, client):
         """This has to work offline, so nothing may be fetched from a CDN."""
