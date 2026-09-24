@@ -7,6 +7,10 @@
  * the join, so a composite key reads as one relationship on two columns rather
  * than as two separate lines.
  *
+ * Routes are orthogonal, as in any modelling tool: horizontal stubs off the
+ * column rows, a vertical gather, then one horizontal run across. Diagonals
+ * are easier to draw but become unreadable as soon as several of them cross.
+ *
  * Nothing here claims cardinality. RelationL reads code, not a schema, so there
  * is no basis for the 1/* markers a modelling tool shows; the join type and the
  * number of times it was written are shown instead.
@@ -17,6 +21,8 @@ const HEADER_HEIGHT = 32;
 const ROW_HEIGHT = 19;
 const MAX_ROWS = 14;
 const STUB = 30;
+//: Corner radius on the orthogonal routes.
+const CORNER = 9;
 
 //: Iterations of the box layout solved before the first paint.
 const SETTLE_STEPS = 260;
@@ -250,11 +256,6 @@ export function createModelView({ mount, onSelectEdge, onSelectTable }) {
     if (active === relationship.id) group.classList.add("is-active");
     else if (active !== null && active !== undefined) group.classList.add("is-muted");
 
-    const { aEdge, bEdge, aDirection, bDirection } = chooseSides(a, b);
-    const direction = aDirection;
-    const aJunction = aEdge + aDirection * STUB;
-    const bJunction = bEdge + bDirection * STUB;
-
     const pairs = relationship.pairs || [];
     const aTargets = pairs.length
       ? pairs.map((pair) => columnY(a, pair.left_column))
@@ -265,15 +266,22 @@ export function createModelView({ mount, onSelectEdge, onSelectTable }) {
     const aHub = average(aTargets);
     const bHub = average(bTargets);
 
+    const route = chooseRoute(a, b, aHub, bHub);
+    const { aEdge, bEdge, aJunction, bJunction, rail } = route;
+
     // Branches first, so the trunk and its arrowhead draw on top of them.
-    for (const y of aTargets) group.append(branch(aEdge, y, aJunction, aHub, aDirection));
-    for (const y of bTargets) group.append(branch(bEdge, y, bJunction, bHub, bDirection));
+    for (const y of aTargets) group.append(branch(aEdge, y, aJunction, aHub));
+    for (const y of bTargets) group.append(branch(bEdge, y, bJunction, bHub));
 
     const trunk = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const midX = (aJunction + bJunction) / 2;
     trunk.setAttribute(
       "d",
-      `M ${aJunction} ${aHub} C ${midX} ${aHub} ${midX} ${bHub} ${bJunction} ${bHub}`
+      elbow([
+        [aJunction, aHub],
+        [rail, aHub],
+        [rail, bHub],
+        [bJunction, bHub],
+      ])
     );
     trunk.setAttribute("class", "link-trunk");
     trunk.setAttribute("marker-end", "url(#rel-arrow)");
@@ -281,7 +289,7 @@ export function createModelView({ mount, onSelectEdge, onSelectTable }) {
 
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
     label.setAttribute("class", "link-label");
-    label.setAttribute("x", String(midX));
+    label.setAttribute("x", String(rail));
     label.setAttribute("y", String((aHub + bHub) / 2 - 7));
     label.setAttribute("text-anchor", "middle");
     label.textContent =
@@ -315,12 +323,13 @@ export function createModelView({ mount, onSelectEdge, onSelectTable }) {
     return group;
   }
 
-  /* Pick which vertical edge of each card the relationship leaves from.
+  /* Pick which edges the route leaves from, and where its vertical run sits.
    *
-   * Always using facing edges loops badly when two cards sit roughly above one
-   * another, so all four combinations are scored and the shortest wins.  Two
-   * stacked cards then get a clean C-shaped route down one side instead. */
-  function chooseSides(a, b) {
+   * All four side combinations are costed as the orthogonal path they would
+   * actually produce, and the cheapest wins.  Two cards stacked above one
+   * another therefore leave from the same side and share a rail beside them,
+   * rather than looping around to face each other. */
+  function chooseRoute(a, b, aHub, bHub) {
     const options = [];
     for (const aRight of [true, false]) {
       for (const bRight of [true, false]) {
@@ -330,27 +339,93 @@ export function createModelView({ mount, onSelectEdge, onSelectTable }) {
         const bDirection = bRight ? 1 : -1;
         const aJunction = aEdge + aDirection * STUB;
         const bJunction = bEdge + bDirection * STUB;
-        let cost = Math.hypot(bJunction - aJunction, b.y - a.y);
-        // A junction that lands inside the other card reads as a line
-        // disappearing behind it.
-        if (aJunction > b.x && aJunction < b.x + b.w) cost += 400;
-        if (bJunction > a.x && bJunction < a.x + a.w) cost += 400;
-        options.push({ aEdge, bEdge, aDirection, bDirection, cost });
+
+        // Leaving the same side means the rail has to clear *both* cards, not
+        // just sit between the two junctions, or it would run behind one.
+        const rail =
+          aDirection === bDirection
+            ? aDirection > 0
+              ? Math.max(a.x + a.w, b.x + b.w) + STUB
+              : Math.min(a.x, b.x) - STUB
+            : (aJunction + bJunction) / 2;
+
+        let cost =
+          Math.abs(aJunction - rail) +
+          Math.abs(aHub - bHub) +
+          Math.abs(rail - bJunction);
+        // A rail drawn over a card reads as a line vanishing behind it.
+        if (overlapsCard(rail, a) || overlapsCard(rail, b)) cost += 600;
+        // Prefer facing sides when they are genuinely side by side.
+        if (aDirection === bDirection) cost += STUB;
+
+        options.push({ aEdge, bEdge, aDirection, bDirection, aJunction, bJunction, rail, cost });
       }
     }
     options.sort((first, second) => first.cost - second.cost);
     return options[0];
   }
 
-  function branch(edgeX, edgeY, junctionX, junctionY, direction) {
+  function overlapsCard(x, box) {
+    return x > box.x - 1 && x < box.x + box.w + 1;
+  }
+
+  function branch(edgeX, edgeY, junctionX, junctionY) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const control = edgeX + direction * STUB * 0.6;
     path.setAttribute(
       "d",
-      `M ${edgeX} ${edgeY} C ${control} ${edgeY} ${junctionX} ${junctionY} ${junctionX} ${junctionY}`
+      elbow([
+        [edgeX, edgeY],
+        [junctionX, edgeY],
+        [junctionX, junctionY],
+      ])
     );
     path.setAttribute("class", "link-branch");
     return path;
+  }
+
+  /* Build an orthogonal path through `points`, rounding each corner.
+   *
+   * Relationships are routed as right angles rather than diagonals: it is what
+   * every modelling tool does, and with several relationships on a board the
+   * shared vertical runs stay readable where crossing diagonals would not.
+   * Corners are eased with a quadratic through the vertex, which keeps the
+   * runs strictly horizontal and vertical while taking the hard edge off. */
+  function elbow(points) {
+    const path = [`M ${round(points[0][0])} ${round(points[0][1])}`];
+
+    for (let i = 1; i < points.length - 1; i += 1) {
+      const [px, py] = points[i - 1];
+      const [cx, cy] = points[i];
+      const [nx, ny] = points[i + 1];
+
+      // Never round by more than half a segment, or corners would overlap.
+      const radius = Math.min(
+        CORNER,
+        Math.hypot(cx - px, cy - py) / 2,
+        Math.hypot(nx - cx, ny - cy) / 2
+      );
+      if (radius < 0.5) {
+        path.push(`L ${round(cx)} ${round(cy)}`);
+        continue;
+      }
+      const into = towards([cx, cy], [px, py], radius);
+      const outOf = towards([cx, cy], [nx, ny], radius);
+      path.push(`L ${round(into[0])} ${round(into[1])}`);
+      path.push(`Q ${round(cx)} ${round(cy)} ${round(outOf[0])} ${round(outOf[1])}`);
+    }
+
+    const last = points[points.length - 1];
+    path.push(`L ${round(last[0])} ${round(last[1])}`);
+    return path.join(" ");
+  }
+
+  function towards([x, y], [tx, ty], distance) {
+    const length = Math.hypot(tx - x, ty - y) || 1;
+    return [x + ((tx - x) / length) * distance, y + ((ty - y) / length) * distance];
+  }
+
+  function round(value) {
+    return Math.round(value * 100) / 100;
   }
 
   function highlight(relationship, on) {

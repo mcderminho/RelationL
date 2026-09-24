@@ -1,179 +1,255 @@
 """Generate the RelationL logo files.
 
-The wordmark is "Relation" plus an L drawn as a crow's-foot relationship: the
-letter's stem and foot are the join, and the foot flares into the "many" end of
-a cardinality marker. It is the product in one glyph, which is the only reason
-to draw a logo at all.
+The wordmark is "Relation" with the final L carrying a crow's foot: the
+letter's own arm runs out and forks into the "many" end of a cardinality
+marker. The product in one glyph.
 
-The text is converted to outlines from DejaVu Sans rather than set as
-``<text>``, so the files render identically everywhere and carry no font
-dependency. DejaVu is licensed permissively; its licence sits next to this
-script.
+Two things keep the L consistent with the rest of the word:
+
+* it is the font's *real* L outline, not a redrawn one, so its stem weight,
+  arm height and proportions are the typeface's own;
+* the fork is derived from that glyph's measured arm, and each prong is cut on
+  a vertical, so the prongs leave the arm exactly flush with it and end on a
+  common line. Angled prongs take the arm's *vertical* thickness rather than
+  its perpendicular thickness, which makes the junction seamless and is the
+  optical correction a type designer would apply anyway.
+
+The text is converted to outlines, so the files carry no font dependency and
+render identically everywhere. Space Grotesk is under the SIL Open Font
+Licence, which permits this; the licence sits beside the font.
 
     uv run python assets/build_logo.py
 
-Regenerate after changing any constant below. Nothing else reads this script at
-runtime, so it is safe to edit freely.
+Nothing reads this script at runtime, so it is safe to edit freely.
 """
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
+from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.recordingPen import RecordingPen
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
 HERE = Path(__file__).parent
-
-#: DejaVu ships with matplotlib; fall back to a few usual locations.
-FONT_NAME = "DejaVuSans.ttf"  # regular, not bold: the wordmark reads lighter
-FONT_CANDIDATES = [
-    Path(
-        "C:/Users/Hugo/Desktop/lilhuge/fplbot/.venv/Lib/site-packages/matplotlib"
-        "/mpl-data/fonts/ttf/" + FONT_NAME
-    ),
-    Path("/usr/share/fonts/truetype/dejavu/" + FONT_NAME),
-]
+FONT = HERE / "fonts" / "SpaceGrotesk-Medium.ttf"
 
 WORD = "Relation"
 
-#: Geometry, in SVG user units.  Cap height drives everything else.
+#: Geometry.  Cap height in SVG units drives everything; the rest is measured
+#: from the typeface so the drawn parts match the drawn letters.
 CAP = 72.0
-UNITS_PER_CAP = 1493.0  # DejaVu Sans cap height, in font units
-STEM = CAP * 0.1353  # the font's own vertical stem, so the L reads as a letter
-TRACKING = CAP * 0.012  # a little air, which reads as deliberate rather than default
-GAP = CAP * 0.05  # tight, so the L reads as the last letter and not a symbol
-#: The crow's foot has to be long and wide enough that three strokes meeting at
-#: a point read as three strokes rather than as a filled wedge.
-FOOT = CAP * 0.58
-SPREAD = CAP * 0.34
-ARM = CAP * 0.46  # length of the L's foot before the crow's foot begins
-PAD = CAP * 0.24
+TRACKING = -0.012  # em, slightly tight: a wordmark should read as one object
+GAP = -0.012  # em between "Relation" and the L, so the L is the last letter
 
-INK_LIGHT = "#1b1b1d"
-INK_DARK = "#ededef"
+#: The fork, as fractions of cap height.
+FOOT = 0.54  # how far the prongs run past the end of the L's arm
+SPREAD = 0.42  # how far the outer prongs rise and fall
+
+#: Prong weight, as a fraction of the arm's.  Lighter than the arm on purpose:
+#: three prongs at full arm weight overlap for most of their length and read as
+#: a solid arrowhead rather than a fork.  At this weight the three bands tile
+#: the arm's terminal exactly, then separate a fifth of the way along.
+PRONG = 0.78
+
+PAD = 0.22  # margin around the lockup, as a fraction of cap height
+
+INK_LIGHT = "#17171a"
+INK_DARK = "#f0f0f2"
 ACCENT_LIGHT = "#9a6408"
 ACCENT_DARK = "#e0a13c"
 
 
-def load_font() -> TTFont:
-    for candidate in FONT_CANDIDATES:
-        if candidate.exists():
-            return TTFont(candidate)
-    raise SystemExit("%s not found; edit FONT_CANDIDATES" % FONT_NAME)
+class Face:
+    """A typeface, measured once and reused."""
+
+    def __init__(self, path: Path) -> None:
+        if not path.exists():
+            raise SystemExit("font not found: %s" % path)
+        self.font = TTFont(path)
+        self.glyphs = self.font.getGlyphSet()
+        self.cmap = self.font.getBestCmap()
+        self.upem = self.font["head"].unitsPerEm
+        self.cap = self._bounds("I")[3]
+        self.scale = CAP / self.cap
+
+    def _bounds(self, character: str):
+        pen = BoundsPen(self.glyphs)
+        self.glyphs[self.cmap[ord(character)]].draw(pen)
+        return pen.bounds
+
+    def advance(self, character: str) -> int:
+        return self.font["hmtx"][self.cmap[ord(character)]][0]
+
+    def corners(self, character: str) -> list[tuple[float, float]]:
+        """On-curve points of a straight-sided glyph, in font units."""
+        pen = RecordingPen()
+        self.glyphs[self.cmap[ord(character)]].draw(pen)
+        return [p for op, args in pen.value if op in ("moveTo", "lineTo") for p in args]
+
+    def outline(self, text: str, baseline: float, left: float) -> tuple[str, float]:
+        """Outline ``text`` as one path, returning it and the pen's end x."""
+        pen = SVGPathPen(self.glyphs, ntos=lambda v: format(round(v, 2), "g"))
+        tracking = TRACKING * self.upem * self.scale
+        x = left
+        for character in text:
+            name = self.cmap[ord(character)]
+            # Fonts measure up from the baseline; SVG measures down.
+            self.glyphs[name].draw(
+                TransformPen(pen, (self.scale, 0, 0, -self.scale, x, baseline))
+            )
+            x += self.advance(character) * self.scale + tracking
+        return pen.getCommands(), x - tracking
 
 
-def word_outline(font: TTFont, baseline: float, left: float) -> tuple[str, float]:
-    """Outline ``WORD`` as one path, returning it with the pen's end x."""
-    glyphs = font.getGlyphSet()
-    cmap = font.getBestCmap()
-    scale = CAP / UNITS_PER_CAP
-    pen = SVGPathPen(glyphs, ntos=lambda v: format(round(v, 2), "g"))
+def measure_ell(face: Face) -> dict[str, float]:
+    """Read the L's stem, arm and terminal straight off the glyph.
 
-    x = left
-    for character in WORD:
-        name = cmap[ord(character)]
-        # Flip the y axis: fonts measure up from the baseline, SVG measures down.
-        transform = TransformPen(pen, (scale, 0, 0, -scale, x, baseline))
-        glyphs[name].draw(transform)
-        x += font["hmtx"][name][0] * scale + TRACKING
-    return pen.getCommands(), x - TRACKING
-
-
-def ell_path(baseline: float, left: float) -> tuple[list[str], float]:
-    """The L: a stem, a foot, and a crow's foot flaring off the end."""
-    centre = left + STEM / 2  # stroke is centred, the letter's left edge is `left`
-    arm_y = baseline - STEM / 2  # so the foot's underside sits on the baseline
-    arm_end = left + STEM + ARM
-    tip = arm_end + FOOT
-
-    strokes = [
-        # Stem down into the foot, as one mitred polyline.
-        f"M {centre:g} {baseline - CAP:g} L {centre:g} {arm_y:g} L {arm_end:g} {arm_y:g}",
-        # Crow's foot: three prongs diverging from where the foot ends.
-        f"M {arm_end:g} {arm_y:g} L {tip:g} {arm_y - SPREAD:g}",
-        f"M {arm_end:g} {arm_y:g} L {tip:g} {arm_y:g}",
-        f"M {arm_end:g} {arm_y:g} L {tip:g} {arm_y + SPREAD:g}",
-    ]
-    return strokes, tip
-
-
-def wordmark(font: TTFont, *, ink: str, accent: str) -> str:
-    baseline = PAD + CAP
-    text, text_end = word_outline(font, baseline, PAD)
-    strokes, tip = ell_path(baseline, text_end + GAP)
-
-    width = tip + PAD
-    # The lowest prong dips below the baseline, so the box has to allow for it.
-    height = baseline + SPREAD - STEM / 2 + PAD
-
-    joined = " ".join(strokes)
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}"\
- width="{width:.0f}" height="{height:.0f}" role="img" aria-label="RelationL">
-  <title>RelationL</title>
-  <path fill="{ink}" d="{text}"/>
-  <path d="{joined}" fill="none" stroke="{accent}" stroke-width="{STEM:g}"\
- stroke-linecap="butt" stroke-linejoin="miter"/>
-</svg>
-"""
-
-
-def wordmark_inline(font: TTFont) -> str:
-    """The wordmark with CSS classes instead of colours.
-
-    ``index.html`` embeds this markup directly so the page's own tokens drive
-    the ink and the accent, which a linked <img> could not do.
+    Space Grotesk's L is a six-point polygon, so its distinct x and y values
+    are exactly the stem edges, the arm's top, and the arm's right end.
     """
+    points = face.corners("L")
+    xs = sorted({round(x, 3) for x, _ in points})
+    ys = sorted({round(y, 3) for _, y in points})
+    if len(xs) < 3 or len(ys) < 3:
+        raise SystemExit("unexpected L outline; this script assumes a straight-sided L")
+    return {
+        "arm_right": xs[-1],
+        "baseline": ys[0],
+        "arm_top": ys[1],
+    }
+
+
+def crows_foot(face: Face, baseline: float, left: float) -> tuple[str, float]:
+    """The fork, as a filled path in SVG units, flush with the L's arm.
+
+    ``left`` is where the L glyph starts, so the fork lands on its terminal.
+    """
+    ell = measure_ell(face)
+    start = left + ell["arm_right"] * face.scale
+    top = baseline - ell["arm_top"] * face.scale
+    bottom = baseline - ell["baseline"] * face.scale
+    thickness = bottom - top
+
+    end = start + FOOT * CAP
+    rise = SPREAD * CAP
+    weight = thickness * PRONG
+
+    # Three parallelograms with vertical ends.  Their start edges tile the
+    # arm's terminal (top band, centre band, bottom band) so the junction is
+    # seamless and full width; they then diverge, and the gaps between them
+    # open early because each band is lighter than the arm.  Cutting every tip
+    # on `end` is what stops the fork looking ragged.
+    centre = top + thickness / 2
+    bands = [
+        (top, top - rise),  # upper prong: starts flush with the arm's top
+        (centre - weight / 2, centre - weight / 2),  # middle: straight on
+        (bottom - weight, bottom + rise - weight),  # lower prong
+    ]
+    prongs = [
+        f"M {start:g} {y0:g} L {end:g} {y1:g} L {end:g} {y1 + weight:g} L {start:g} {y0 + weight:g} Z"
+        for y0, y1 in bands
+    ]
+    return " ".join(prongs), end
+
+
+def lockup(face: Face) -> tuple[str, str, float, float]:
+    """Return (text path, L path, width, height) for the whole wordmark."""
+    pad = PAD * CAP
+    baseline = pad + CAP
+
+    text, text_end = face.outline(WORD, baseline, pad)
+    ell_left = text_end + GAP * face.upem * face.scale
+
+    ell, _ = face.outline("L", baseline, ell_left)
+    fork, tip = crows_foot(face, baseline, ell_left)
+
+    width = tip + pad
+    height = baseline + SPREAD * CAP + pad  # the lowest prong drops below the baseline
+    return text, ell + " " + fork, width, height
+
+
+def svg(body: str, width: float, height: float, *, label: bool = True) -> str:
+    title = "  <title>RelationL</title>\n" if label else ""
+    attrs = (
+        ' role="img" aria-label="RelationL"'
+        if label
+        else ' class="logo" aria-hidden="true"'
+    )
     return (
-        wordmark(font, ink="INK", accent="ACCENT")
-        .replace('fill="INK"', 'class="logo-ink"')
-        .replace('stroke="ACCENT"', 'class="logo-mark"')
-        .replace(' role="img" aria-label="RelationL"', ' class="logo" aria-hidden="true"')
-        .replace("  <title>RelationL</title>" + chr(10), "")
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}"'
+        f' width="{width:.0f}" height="{height:.0f}"{attrs}>\n{title}{body}</svg>\n'
     )
 
 
-def mark(*, accent: str) -> str:
+def wordmark(face: Face, *, ink: str, accent: str) -> str:
+    text, ell, width, height = lockup(face)
+    body = f'  <path fill="{ink}" d="{text}"/>\n  <path fill="{accent}" d="{ell}"/>\n'
+    return svg(body, width, height)
+
+
+def wordmark_inline(face: Face) -> str:
+    """The wordmark with CSS classes instead of colours.
+
+    ``index.html`` embeds this markup so the page's own tokens drive the ink
+    and the accent, which a linked <img> could not do.
+    """
+    text, ell, width, height = lockup(face)
+    body = f'  <path class="logo-ink" d="{text}"/>\n  <path class="logo-mark" d="{ell}"/>\n'
+    return svg(body, width, height, label=False)
+
+
+def mark(face: Face, *, accent: str) -> str:
     """The L on its own, centred in a square, for favicons and avatars."""
-    strokes, tip = ell_path(PAD + CAP, PAD)
+    pad = PAD * CAP
+    baseline = pad + CAP
+    ell, _ = face.outline("L", baseline, pad)
+    fork, tip = crows_foot(face, baseline, pad)
 
-    content_width = tip - PAD
-    content_height = CAP + SPREAD - STEM / 2
-    side = max(content_width, content_height) + PAD * 2
-    offset_x = (side - content_width) / 2 - PAD
-    offset_y = (side - content_height) / 2 - PAD
+    content_width = tip - pad
+    content_height = CAP + SPREAD * CAP
+    side = max(content_width, content_height) + pad * 2
+    dx = (side - content_width) / 2 - pad
+    dy = (side - content_height) / 2 - pad
 
-    joined = " ".join(strokes)
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {side:.0f} {side:.0f}"\
- width="{side:.0f}" height="{side:.0f}" role="img" aria-label="RelationL">
-  <title>RelationL</title>
-  <g transform="translate({offset_x:.2f} {offset_y:.2f})">
-    <path d="{joined}" fill="none" stroke="{accent}" stroke-width="{STEM:g}"\
- stroke-linecap="butt" stroke-linejoin="miter"/>
-  </g>
-</svg>
-"""
+    body = (
+        f'  <g transform="translate({dx:.2f} {dy:.2f})">\n'
+        f'    <path fill="{accent}" d="{ell} {fork}"/>\n  </g>\n'
+    )
+    return svg(body, side, side)
 
 
-def rasterise(svg: Path, png: Path, width: int) -> bool:
+def update_index(path: Path, inline: str) -> bool:
+    """Replace the logo embedded in index.html, so the two cannot drift."""
+    if not path.exists():
+        return False
+    markup = path.read_text(encoding="utf-8")
+    pattern = re.compile(r'[ \t]*<svg[^>]*class="logo"[^>]*>.*?</svg>\n', re.S)
+    if not pattern.search(markup):
+        return False
+    indented = "".join("        " + line + "\n" for line in inline.strip().splitlines())
+    path.write_text(pattern.sub(lambda _match: indented, markup, count=1), encoding="utf-8")
+    return True
+
+
+def rasterise(source: Path, target: Path, width: int) -> bool:
     """Render an SVG to a transparent PNG with headless Edge or Chrome."""
     browsers = [
         r"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
         r"C:/Program Files/Google/Chrome/Application/chrome.exe",
         "chromium",
     ]
-    text = svg.read_text(encoding="utf-8")
-    import re
-
+    text = source.read_text(encoding="utf-8")
     box = re.search(r'viewBox="0 0 (\d+) (\d+)"', text)
     if not box:
         return False
-    ratio = int(box.group(2)) / int(box.group(1))
-    height = round(width * ratio)
+    height = round(width * int(box.group(2)) / int(box.group(1)))
 
-    wrapper = svg.with_suffix(".tmp.html")
+    wrapper = source.with_suffix(".tmp.html")
     wrapper.write_text(
         "<!doctype html><style>html,body{margin:0;background:transparent}"
         f"svg{{width:{width}px;height:{height}px;display:block}}</style>" + text,
@@ -183,7 +259,7 @@ def rasterise(svg: Path, png: Path, width: int) -> bool:
         for browser in browsers:
             if browser.endswith(".exe") and not Path(browser).exists():
                 continue
-            result = subprocess.run(
+            subprocess.run(
                 [
                     browser,
                     "--headless=new",
@@ -191,16 +267,15 @@ def rasterise(svg: Path, png: Path, width: int) -> bool:
                     "--default-background-color=00000000",
                     f"--window-size={width},{height}",
                     "--virtual-time-budget=2000",
-                    f"--screenshot={png.resolve()}",
+                    f"--screenshot={target.resolve()}",
                     wrapper.resolve().as_uri(),
                 ],
                 capture_output=True,
                 timeout=90,
                 check=False,
             )
-            if png.exists():
+            if target.exists():
                 return True
-            del result
     except (OSError, subprocess.SubprocessError):
         pass
     finally:
@@ -209,28 +284,30 @@ def rasterise(svg: Path, png: Path, width: int) -> bool:
 
 
 def main() -> None:
-    font = load_font()
+    face = Face(FONT)
     variants = {
-        "wordmark-light.svg": wordmark(font, ink=INK_LIGHT, accent=ACCENT_LIGHT),
-        "wordmark-dark.svg": wordmark(font, ink=INK_DARK, accent=ACCENT_DARK),
-        "wordmark-mono.svg": wordmark(font, ink="currentColor", accent="currentColor"),
-        "wordmark-ink-light.svg": wordmark(font, ink=INK_LIGHT, accent=INK_LIGHT),
-        "wordmark-ink-dark.svg": wordmark(font, ink=INK_DARK, accent=INK_DARK),
-        "mark-light.svg": mark(accent=ACCENT_LIGHT),
-        "mark-dark.svg": mark(accent=ACCENT_DARK),
-        "mark-mono.svg": mark(accent="currentColor"),
-        "wordmark-inline.svg": wordmark_inline(font),
+        "wordmark-light.svg": wordmark(face, ink=INK_LIGHT, accent=ACCENT_LIGHT),
+        "wordmark-dark.svg": wordmark(face, ink=INK_DARK, accent=ACCENT_DARK),
+        "wordmark-mono.svg": wordmark(face, ink="currentColor", accent="currentColor"),
+        "wordmark-ink-light.svg": wordmark(face, ink=INK_LIGHT, accent=INK_LIGHT),
+        "wordmark-ink-dark.svg": wordmark(face, ink=INK_DARK, accent=INK_DARK),
+        "mark-light.svg": mark(face, accent=ACCENT_LIGHT),
+        "mark-dark.svg": mark(face, accent=ACCENT_DARK),
+        "mark-mono.svg": mark(face, accent="currentColor"),
+        "wordmark-inline.svg": wordmark_inline(face),
     }
-
     for name, content in variants.items():
         (HERE / name).write_text(content, encoding="utf-8")
         print("wrote", name)
 
-    # The web app needs the mark for its favicon.
     static = HERE.parent / "src" / "relationl" / "web" / "static"
     if static.is_dir():
-        (static / "favicon.svg").write_text(mark(accent=ACCENT_DARK), encoding="utf-8")
-        print("wrote", (static / "favicon.svg").name)
+        (static / "favicon.svg").write_text(
+            mark(face, accent=ACCENT_DARK), encoding="utf-8"
+        )
+        print("wrote static/favicon.svg")
+        if update_index(static / "index.html", variants["wordmark-inline.svg"]):
+            print("updated static/index.html")
 
     for name, width in [
         ("wordmark-light.svg", 960),

@@ -349,8 +349,9 @@ uv run ruff check .
 ```
 
 The logo is generated, not hand-drawn. `assets/build_logo.py` outlines the
-wordmark from DejaVu Sans and draws the L as a crow's-foot relationship, then
-writes every SVG and PNG variant plus the app's favicon:
+wordmark from Space Grotesk and derives the L's crow's foot from that glyph's
+own arm, then writes every SVG and PNG variant, the app's favicon, and the copy
+embedded in `index.html`:
 
 ```bash
 uv run python assets/build_logo.py
@@ -363,5 +364,7 @@ which `test_comments.py` and the end-to-end scan assert never reach the graph.
 
 ## Licence
 
-MIT. The logo embeds outlines from DejaVu Sans, whose licence is in
-`assets/DEJAVU-LICENSE.txt`.
+MIT. The logo embeds outlines from
+[Space Grotesk](https://github.com/floriankarsten/space-grotesk), which is
+under the SIL Open Font Licence; the licence and the font are in
+`assets/fonts/`.
