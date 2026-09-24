@@ -1,0 +1,47 @@
+# relationl.yaml - configuration for a join-lineage scan.
+version: 1
+
+# Where the scan results are written.  Relative paths resolve against this file.
+database: relationl.db
+
+# Optional: number of worker processes.  Defaults to (cpu_count - 1).
+# workers: 8
+
+# Applied to every source unless the source overrides them.
+defaults:
+  include: ["**/*.py", "**/*.sql", "**/*.ipynb", "**/*.txt"]
+  exclude:
+    - "**/.git/**"
+    - "**/.venv/**"
+    - "**/node_modules/**"
+    - "**/__pycache__/**"
+  max_file_bytes: 2000000
+  sql_dialect: spark
+
+sources:
+  - name: analytics
+    roots:
+      - ../analytics-etl
+    # Regexes (not globs) applied to the root-relative path.
+    file_exclude:
+      - "(^|/)tests?/"
+      - "_archive/"
+    # Bare table names inherit these, so `orders` becomes `prod.analytics.orders`.
+    default_catalog: prod
+    default_schema: analytics
+    # Keep only warehouse tables, and drop scratch space.
+    table_include:
+      - "^prod\\.(analytics|raw)\\."
+    table_exclude:
+      - "_tmp$"
+      - "^scratch\\."
+    # Collapse environment prefixes so dev and prod land on the same node.
+    table_rewrite:
+      - pattern: "^(dev|staging)_"
+        replacement: ""
+
+  - name: reporting
+    roots:
+      - ../reporting
+    sql_dialect: snowflake
+    default_schema: reporting
