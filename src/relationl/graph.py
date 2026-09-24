@@ -336,6 +336,121 @@ class GraphStore:
             "truncated": len(ranked) >= limit,
         }
 
+    def model(
+        self,
+        *,
+        source: str | None = None,
+        min_occurrences: int = 1,
+        include_ambiguous: bool = True,
+        limit: int = 200,
+    ) -> dict:
+        """Tables with their columns, and relationships keyed to those columns.
+
+        This is what the semantic model view draws.  The columns are the ones
+        the codebase references, not a schema read from a warehouse, so a table
+        shows the columns it is actually used by.
+        """
+        edges = self.edges(
+            source=source,
+            min_occurrences=min_occurrences,
+            include_ambiguous=include_ambiguous,
+            limit=200_000,
+        )
+        ranked = self.nodes(source=source, limit=limit)
+        keep = {n.table_key for n in ranked}
+        visible = [e for e in edges if e.left in keep and e.right in keep]
+        connected = {e.left for e in visible} | {e.right for e in visible}
+        tables = [n for n in ranked if n.table_key in connected]
+        wanted = {n.table_key for n in tables}
+
+        columns = self._columns_by_table(wanted, source=source)
+        relationships = self._relationships(visible)
+
+        # Whether a column is a join key is decided by the relationships that
+        # are actually on screen, not by every join ever recorded: with the
+        # ambiguous ones filtered out, their keys must stop being highlighted.
+        keyed: set[tuple[str, str]] = set()
+        for relationship in relationships:
+            for pair in relationship["pairs"]:
+                keyed.add((relationship["left"], pair["left_column"]))
+                keyed.add((relationship["right"], pair["right_column"]))
+
+        for table_key, entries in columns.items():
+            for column in entries:
+                column["is_join_key"] = (table_key, column["name"]) in keyed
+            entries.sort(key=lambda c: (not c["is_join_key"], c["name"]))
+
+        return {
+            "tables": [
+                {**node.as_dict(), "columns": columns.get(node.table_key, [])}
+                for node in tables
+            ],
+            "relationships": relationships,
+            "isolated": len(ranked) - len(tables),
+            "truncated": len(ranked) >= limit,
+        }
+
+    def _columns_by_table(
+        self, tables: set[str], *, source: str | None
+    ) -> dict[str, list[dict]]:
+        if not tables:
+            return {}
+        placeholders = ",".join("?" for _ in tables)
+        sql = (
+            "SELECT table_key, name, is_join_key, ref_count FROM v_columns "
+            "WHERE table_key IN (%s)" % placeholders
+        )
+        params: list[object] = sorted(tables)
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        # Join keys first: they are what the relationships attach to.
+        sql += " ORDER BY table_key, is_join_key DESC, name"
+
+        out: dict[str, list[dict]] = {}
+        with closing(self._connect()) as connection:
+            for row in connection.execute(sql, params):
+                out.setdefault(row["table_key"], []).append(
+                    {
+                        "name": row["name"],
+                        "is_join_key": bool(row["is_join_key"]),
+                        "ref_count": row["ref_count"],
+                    }
+                )
+        return out
+
+    def _relationships(self, edges: Sequence[Edge]) -> list[dict]:
+        """Attach each edge to the specific columns its predicates key on."""
+        if not edges:
+            return []
+        by_id = {edge.id: edge for edge in edges}
+        placeholders = ",".join("?" for _ in by_id)
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT edge_id, ordinal, left_column, right_column, operator "
+                "FROM edge_conditions WHERE edge_id IN (%s) ORDER BY edge_id, ordinal"
+                % placeholders,
+                sorted(by_id),
+            ).fetchall()
+
+        pairs: dict[int, list[dict]] = {}
+        for row in rows:
+            edge = by_id[row["edge_id"]]
+            pair = _column_pair(edge, row["left_column"], row["right_column"])
+            if pair is None:
+                continue
+            bucket = pairs.setdefault(edge.id, [])
+            if pair not in bucket:
+                pair["operator"] = row["operator"]
+                bucket.append(pair)
+
+        out = []
+        for edge in edges:
+            payload = edge.as_dict()
+            payload["pairs"] = pairs.get(edge.id, [])
+            out.append(payload)
+        return out
+
     def nodes_by_key(self, keys: Sequence[str], *, source: str | None = None) -> list[Node]:
         if not keys:
             return []
@@ -416,6 +531,41 @@ def _rebuild(
     tables.reverse()
     edges.reverse()
     return Path(tables=tables, edges=edges)
+
+
+def _column_pair(edge: Edge, left: str | None, right: str | None) -> dict | None:
+    """Resolve two qualified column names onto the edge's left and right sides.
+
+    Returns ``None`` for a predicate that is not a plain column comparison
+    (``LOWER(a.x) = LOWER(b.y)``), which has no single column to anchor to.
+    """
+    if not left or not right:
+        return None
+    first = _split_qualified(edge, left)
+    second = _split_qualified(edge, right)
+    if first is None or second is None:
+        return None
+
+    (left_table, left_column) = first
+    (right_table, right_column) = second
+    if left_table == edge.left and right_table == edge.right:
+        return {"left_column": left_column, "right_column": right_column}
+    if left_table == edge.right and right_table == edge.left:
+        return {"left_column": right_column, "right_column": left_column}
+    return None
+
+
+def _split_qualified(edge: Edge, qualified: str) -> tuple[str, str] | None:
+    """Split "schema.table.column" using the edge's own table names.
+
+    Splitting on the last dot would be wrong for a table whose name contains
+    one, so the known table keys are matched as prefixes instead.
+    """
+    for table in (edge.left, edge.right):
+        prefix = table + "."
+        if qualified.startswith(prefix):
+            return table, qualified[len(prefix) :]
+    return None
 
 
 def _node(row: sqlite3.Row) -> Node:

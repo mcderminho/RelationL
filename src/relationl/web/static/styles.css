@@ -32,6 +32,7 @@
      read as a shape at small radii, especially in light mode. */
   --node-fill: #23232a;
   --node-line: #7b7b86;
+  --link: #5c5c68;
 
   --danger: #d86b5c;
 
@@ -67,6 +68,7 @@
 
     --node-fill: #ffffff;
     --node-line: #70707a;
+    --link: #9a9aa2;
 
     --danger: #a8331f;
   }
@@ -419,6 +421,207 @@ button.primary:hover:not(:disabled) {
 
 .swatch.maybe {
   border-top-style: dashed;
+}
+
+/* ---------------------------------------------------------- view switch -- */
+
+.switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+
+.switch button {
+  padding: 4px 11px;
+  border: 0;
+  border-radius: 2px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.switch button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.switch button:active:not([aria-pressed="true"]) {
+  transform: none;
+}
+
+/* ---------------------------------------------------------- model view -- */
+
+.model {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.model:active {
+  cursor: grabbing;
+}
+
+/* An explicit `display` beats the user-agent rule for [hidden], so every
+   element that is toggled needs its own hidden rule. */
+#graph[hidden],
+.model[hidden],
+.legend[hidden],
+.stage-controls[hidden] {
+  display: none;
+}
+
+.model-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.model-links {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.model-table {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
+}
+
+.model-head {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg-raised);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 560;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: grab;
+}
+
+.model-head:active {
+  cursor: grabbing;
+  transform: none;
+}
+
+.model-head em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.model-column {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* A join key is the column a relationship attaches to, so it carries the
+   accent and a key marker; everything else stays quiet. */
+.model-column.is-key {
+  color: var(--text);
+}
+
+.model-column.is-key::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin-right: 7px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.model-column:not(.is-key) {
+  padding-left: 22px;
+}
+
+.model-column.is-lit {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.model-more {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.link {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.link-trunk,
+.link-branch {
+  fill: none;
+  stroke: var(--link);
+  stroke-width: 1.5;
+}
+
+.link-branch {
+  stroke-width: 1.2;
+}
+
+.link.is-candidate .link-trunk,
+.link.is-candidate .link-branch {
+  stroke-dasharray: 4 4;
+}
+
+.model-links marker path {
+  fill: var(--link);
+}
+
+.link:hover .link-trunk,
+.link.is-active .link-trunk {
+  stroke: var(--accent);
+  stroke-width: 2.4;
+}
+
+.link:hover .link-branch,
+.link.is-active .link-branch {
+  stroke: var(--accent);
+  stroke-width: 1.8;
+}
+
+.link.is-muted {
+  opacity: 0.3;
+}
+
+.link-label {
+  fill: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.link.is-active .link-label {
+  fill: var(--accent);
+  opacity: 1;
 }
 
 /* --------------------------------------------------------- empty states -- */

@@ -12,7 +12,7 @@ import json
 import re
 from collections.abc import Iterator
 
-from ..models import Join, TableRef
+from ..models import ColumnRef, Join, TableRef
 from ..naming import TableNormaliser
 from .python import PythonAnalyzer
 from .sql import SqlAnalyzer
@@ -42,16 +42,19 @@ class NotebookAnalyzer:
         self.python = PythonAnalyzer(normaliser, dialect=dialect, language=language)
         self.sql = SqlAnalyzer(normaliser, dialect=dialect, language=language)
 
-    def analyze(self, text: str) -> tuple[list[Join], set[TableRef], list[str]]:
+    def analyze(
+        self, text: str
+    ) -> tuple[list[Join], set[TableRef], set[ColumnRef], list[str]]:
         try:
             document = json.loads(text)
         except (ValueError, UnicodeDecodeError) as err:
-            return [], set(), ["invalid notebook JSON: %s" % err]
+            return [], set(), set(), ["invalid notebook JSON: %s" % err]
         if not isinstance(document, dict):
-            return [], set(), ["notebook root is not an object"]
+            return [], set(), set(), ["notebook root is not an object"]
 
         joins: list[Join] = []
         tables: set[TableRef] = set()
+        columns: set[ColumnRef] = set()
         errors: list[str] = []
 
         python_lines: list[str] = []
@@ -62,11 +65,12 @@ class NotebookAnalyzer:
             lines = source.splitlines()
             if _CELL_MAGIC.match(source):
                 body = "\n".join(lines[1:])
-                cell_joins, cell_tables, cell_errors = self.sql.analyze(
+                cell_joins, cell_tables, cell_columns, cell_errors = self.sql.analyze(
                     body, base_line=logical + 2
                 )
                 joins.extend(cell_joins)
                 tables.update(cell_tables)
+                columns.update(cell_columns)
                 errors.extend(cell_errors)
                 logical += len(lines)
                 continue
@@ -77,11 +81,15 @@ class NotebookAnalyzer:
                 if magic:
                     inline = magic.group(2).strip()
                     if inline:
-                        cell_joins, cell_tables, cell_errors = self.sql.analyze(
-                            inline, base_line=logical
-                        )
+                        (
+                            cell_joins,
+                            cell_tables,
+                            cell_columns,
+                            cell_errors,
+                        ) = self.sql.analyze(inline, base_line=logical)
                         joins.extend(cell_joins)
                         tables.update(cell_tables)
+                        columns.update(cell_columns)
                         errors.extend(cell_errors)
                     python_lines.append("")
                 elif _OTHER_MAGIC.match(line):
@@ -91,17 +99,18 @@ class NotebookAnalyzer:
                 line_map.append(logical)
 
         if python_lines:
-            code_joins, code_tables, code_errors = self.python.analyze(
+            code_joins, code_tables, code_columns, code_errors = self.python.analyze(
                 "\n".join(python_lines), line_map=line_map
             )
             joins.extend(code_joins)
             tables.update(code_tables)
+            columns.update(code_columns)
             errors.extend(code_errors)
 
         for join in joins:
             tables.add(join.left)
             tables.add(join.right)
-        return joins, tables, errors
+        return joins, tables, columns, errors
 
 
 def _code_cells(document: dict) -> Iterator[str]:

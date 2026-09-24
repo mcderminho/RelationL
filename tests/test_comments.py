@@ -12,7 +12,7 @@ import pytest
 
 
 def joins_of(analyzer, text):
-    found, _, _ = analyzer.analyze(textwrap.dedent(text))
+    found, _, _, _ = analyzer.analyze(textwrap.dedent(text))
     return found
 
 
@@ -56,7 +56,7 @@ class TestSqlComments:
 
     def test_hash_comment_does_not_cost_the_statement(self, sql):
         """A rejected token used to lose the whole statement, valid joins too."""
-        _, _, errors = sql.analyze("SELECT 1 FROM a.t1 x\n# note\nJOIN c.t3 z ON x.k = z.k")
+        _, _, _, errors = sql.analyze("SELECT 1 FROM a.t1 x\n# note\nJOIN c.t3 z ON x.k = z.k")
         assert errors == []
 
     def test_hash_inside_a_string_literal_is_preserved(self, sql):
@@ -67,7 +67,7 @@ class TestSqlComments:
         assert found[0].condition == "a.t1.k = b.t2.k"
 
     def test_fully_commented_statement_yields_nothing(self, sql):
-        joins, tables, _ = sql.analyze(
+        joins, tables, _, _ = sql.analyze(
             "-- SELECT 1 FROM a.t1 x JOIN b.t2 y ON x.k = y.k"
         )
         assert joins == []
@@ -254,7 +254,7 @@ def test_notebook_hash_comment_is_ignored(notebook):
             "nbformat_minor": 5,
         }
     )
-    joins, _, errors = notebook.analyze(document)
+    joins, _, _, errors = notebook.analyze(document)
     assert errors == []
     assert len(joins) == 1
     assert joins[0].condition == "x.t1.j = y.t2.j"

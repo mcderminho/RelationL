@@ -33,7 +33,7 @@ def test_lineage_crosses_cell_boundaries(notebook):
         'customers = spark.table("crm.customers")\n',
         "orders.join(customers, orders.cid == customers.id)\n",
     )
-    joins, _, errors = notebook.analyze(document)
+    joins, _, _, errors = notebook.analyze(document)
     assert errors == []
     assert len(joins) == 1
     assert (joins[0].left.key, joins[0].right.key) == ("crm.customers", "sales.orders")
@@ -43,13 +43,13 @@ def test_sql_cell_magic_is_parsed(notebook):
     document = notebook_json(
         "%%sql\nSELECT 1 FROM a.t1 x JOIN b.t2 y ON x.k = y.k\n",
     )
-    joins, _, _ = notebook.analyze(document)
+    joins, _, _, _ = notebook.analyze(document)
     assert joins[0].condition == "a.t1.k = b.t2.k"
 
 
 def test_sql_line_magic_is_parsed(notebook):
     document = notebook_json("%sql SELECT 1 FROM a.t1 x JOIN b.t2 y ON x.k = y.k\n")
-    joins, _, _ = notebook.analyze(document)
+    joins, _, _, _ = notebook.analyze(document)
     assert joins[0].condition == "a.t1.k = b.t2.k"
 
 
@@ -62,7 +62,7 @@ def test_other_magics_do_not_break_parsing(notebook):
         'customers = spark.table("crm.customers")\n'
         "orders.join(customers, orders.cid == customers.id)\n"
     )
-    joins, _, errors = notebook.analyze(document)
+    joins, _, _, errors = notebook.analyze(document)
     assert errors == []
     assert len(joins) == 1
 
@@ -85,26 +85,26 @@ def test_markdown_cells_are_ignored(notebook):
             "nbformat_minor": 5,
         }
     )
-    joins, _, _ = notebook.analyze(document)
+    joins, _, _, _ = notebook.analyze(document)
     assert len(joins) == 1
 
 
 def test_invalid_json_is_reported_not_raised(notebook):
-    joins, tables, errors = notebook.analyze("{not json at all")
+    joins, tables, _, errors = notebook.analyze("{not json at all")
     assert joins == []
     assert tables == set()
     assert errors and "invalid notebook JSON" in errors[0]
 
 
 def test_empty_notebook(notebook):
-    joins, tables, errors = notebook.analyze(json.dumps({"cells": []}))
+    joins, tables, _, errors = notebook.analyze(json.dumps({"cells": []}))
     assert joins == []
     assert errors == []
 
 
 def test_fixture_notebook(notebook):
     document = (FIXTURES / "etl" / "region_analysis.ipynb").read_text(encoding="utf-8")
-    joins, tables, errors = notebook.analyze(document)
+    joins, tables, _, errors = notebook.analyze(document)
     assert errors == []
     pairs = set(edge_map(joins))
     # From the PySpark cell.
@@ -121,6 +121,6 @@ def test_line_numbers_are_notebook_relative(notebook):
         'customers = spark.table("crm.customers")\n',
         "\n\norders.join(customers, orders.cid == customers.id)\n",
     )
-    joins, _, _ = notebook.analyze(document)
+    joins, _, _, _ = notebook.analyze(document)
     # Cell 1 is line 1, cell 2 is line 2, then two blank lines in cell 3.
     assert joins[0].line == 5

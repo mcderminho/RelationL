@@ -170,7 +170,7 @@ class TestTableFilters:
 
         source = make_source(table_rewrite=(Rewrite(_re.compile("^dev_"), ""),))
         analyzer = SqlAnalyzer(TableNormaliser(source), dialect="spark")
-        joins, _, _ = analyzer.analyze(
+        joins, _, _, _ = analyzer.analyze(
             "SELECT 1 FROM dev_sales.orders o JOIN dev_crm.customers c ON o.cid = c.id"
         )
         assert joins[0].condition == "crm.customers.id = sales.orders.cid"
@@ -180,7 +180,7 @@ class TestTableFilters:
 
         source = make_source(table_exclude=(_re.compile("^crm\\."),))
         analyzer = SqlAnalyzer(TableNormaliser(source), dialect="spark")
-        joins, tables, _ = analyzer.analyze(
+        joins, tables, _, _ = analyzer.analyze(
             "SELECT 1 FROM sales.orders o JOIN crm.customers c ON o.cid = c.id"
         )
         assert joins == []

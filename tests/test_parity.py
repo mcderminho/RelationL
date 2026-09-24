@@ -95,8 +95,8 @@ EQUIVALENTS = [
     "label,sql_text,spark_text", EQUIVALENTS, ids=[e[0] for e in EQUIVALENTS]
 )
 def test_sql_and_pyspark_agree(sql, pyspark, label, sql_text, spark_text):
-    sql_joins, _, _ = sql.analyze(sql_text)
-    spark_joins, _, _ = pyspark.analyze(READS + textwrap.dedent(spark_text))
+    sql_joins, _, _, _ = sql.analyze(sql_text)
+    spark_joins, _, _, _ = pyspark.analyze(READS + textwrap.dedent(spark_text))
 
     assert len(sql_joins) == 1, "SQL side produced %d joins" % len(sql_joins)
     assert len(spark_joins) == 1, "PySpark side produced %d joins" % len(spark_joins)
@@ -108,7 +108,7 @@ def test_sql_and_pyspark_agree(sql, pyspark, label, sql_text, spark_text):
 
 def test_cte_and_dataframe_chains_agree(sql, pyspark):
     """The headline example: a CTE and a DataFrame chain are one edge."""
-    sql_joins, _, _ = sql.analyze(
+    sql_joins, _, _, _ = sql.analyze(
         """
         WITH recent AS (
             SELECT o.order_id, o.cid FROM sales.orders o WHERE o.d > 1
@@ -116,7 +116,7 @@ def test_cte_and_dataframe_chains_agree(sql, pyspark):
         SELECT 1 FROM recent r JOIN crm.customers c ON r.cid = c.id
         """
     )
-    spark_joins, _, _ = pyspark.analyze(
+    spark_joins, _, _, _ = pyspark.analyze(
         READS
         + textwrap.dedent(
             """
@@ -132,10 +132,10 @@ def test_fixture_files_agree(sql, pyspark):
     """The SQL and PySpark fixture files describe the same mart."""
     from conftest import FIXTURES
 
-    sql_joins, _, _ = sql.analyze(
+    sql_joins, _, _, _ = sql.analyze(
         (FIXTURES / "warehouse" / "orders_enriched.sql").read_text(encoding="utf-8")
     )
-    spark_joins, _, _ = pyspark.analyze(
+    spark_joins, _, _, _ = pyspark.analyze(
         (FIXTURES / "etl" / "build_orders.py").read_text(encoding="utf-8")
     )
 

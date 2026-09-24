@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import NamedTuple
 
 from sqlglot import exp
 
@@ -162,6 +163,18 @@ def _split_dotted(text: str) -> list[str]:
             buf.append(ch)
     out.append("".join(buf))
     return out
+
+
+class ColumnRef(NamedTuple):
+    """A column of a physical table.
+
+    Carrying the *name* alongside the table is what makes a renamed CTE column
+    resolve properly: ``SELECT k AS j FROM b.t2`` referenced later as ``s.j``
+    has to come back as ``b.t2.k``, not ``b.t2.j``.
+    """
+
+    table: TableRef
+    name: str
 
 
 def column_expr(table: TableRef | None, column: str) -> exp.Column:
@@ -339,6 +352,9 @@ class FileFindings:
     language: str
     joins: list[Join] = field(default_factory=list)
     tables: set[TableRef] = field(default_factory=set)
+    #: Columns observed against a resolved table.  This is what the model view
+    #: draws; it is what the code references, not a schema.
+    columns: set[ColumnRef] = field(default_factory=set)
     errors: list[str] = field(default_factory=list)
 
     def to_payload(self) -> dict:
@@ -347,6 +363,10 @@ class FileFindings:
             "language": self.language,
             "errors": self.errors,
             "tables": [list(t.parts) for t in sorted(self.tables)],
+            "columns": [
+                [list(c.table.parts), c.name]
+                for c in sorted(self.columns, key=lambda c: (c.table.key, c.name))
+            ],
             "joins": [
                 {
                     "left": list(j.left.parts),
@@ -369,6 +389,10 @@ class FileFindings:
     def from_payload(cls, path: str, payload: dict) -> FileFindings:
         findings = cls(path=path, language=payload["language"], errors=list(payload["errors"]))
         findings.tables = {ref_from_parts(p) for p in payload["tables"]}
+        findings.columns = {
+            ColumnRef(ref_from_parts(parts), name)
+            for parts, name in payload.get("columns", ())
+        }
         for raw in payload["joins"]:
             findings.joins.append(
                 Join(

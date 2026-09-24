@@ -17,7 +17,7 @@ items = spark.table("sales.items")
 def joins_of(analyzer, code, *, reads: bool = True):
     """Analyse a snippet, prefixed by the standard table reads."""
     source = (READS if reads else "") + textwrap.dedent(code)
-    found, _, _ = analyzer.analyze(source)
+    found, _, _, _ = analyzer.analyze(source)
     return found
 
 
@@ -228,6 +228,6 @@ class TestEmbeddedSql:
         assert found[0].condition == "a.t1.k = b.t2.k"
 
     def test_syntax_error_is_reported_not_raised(self, pyspark):
-        joins, tables, errors = pyspark.analyze("def broken(:\n  pass")
+        joins, tables, _, errors = pyspark.analyze("def broken(:\n  pass")
         assert joins == []
         assert errors and "syntax error" in errors[0]

@@ -21,10 +21,9 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
-from ..models import Join, JoinCondition, TableRef, column_expr
+from ..models import ColumnRef, Join, JoinCondition, TableRef, column_expr
 from ..naming import TableNormaliser
 from .sql import (
-    ColumnRef,
     Grouped,
     SqlAnalyzer,
     _columns_for,
@@ -120,8 +119,8 @@ class PythonAnalyzer:
 
     def analyze(
         self, source: str, *, line_map: Sequence[int] | None = None
-    ) -> tuple[list[Join], set[TableRef], list[str]]:
-        """Return ``(joins, base_tables, errors)`` for a Python module.
+    ) -> tuple[list[Join], set[TableRef], set[ColumnRef], list[str]]:
+        """Return ``(joins, base_tables, columns, errors)`` for a Python module.
 
         ``line_map`` translates 1-based AST line numbers onto file lines, which
         is how notebook cells are stitched back to their original positions.
@@ -130,7 +129,7 @@ class PythonAnalyzer:
         try:
             tree = ast.parse(source)
         except SyntaxError as err:
-            return [], set(), ["syntax error on line %s: %s" % (err.lineno, err.msg)]
+            return [], set(), set(), ["syntax error on line %s: %s" % (err.lineno, err.msg)]
 
         env = _Environment(self.normaliser, self.sql_analyzer, self.dialect, self.language)
         try:
@@ -158,7 +157,7 @@ class PythonAnalyzer:
         for join in joins:
             tables.add(join.left)
             tables.add(join.right)
-        return joins, tables, errors
+        return joins, tables, set(env.columns), errors
 
 
 def _bare_string_statements(tree: ast.AST) -> set[int]:
@@ -215,6 +214,7 @@ class _Environment:
         self.views: dict[str, frozenset[TableRef]] = {}
         self.joins: list[Join] = []
         self.tables: set[TableRef] = set()
+        self.columns: set[ColumnRef] = set()
         self.errors: list[str] = []
         self.consumed: set[int] = set()
 
@@ -241,6 +241,16 @@ class _Environment:
             elif isinstance(node, ast.Return) and node.value is not None:
                 self.evaluate(node.value)
 
+    def _note_column(self, tables: frozenset[TableRef], name: str) -> None:
+        """Record a column, but only when the DataFrame is one table.
+
+        With several tables behind a DataFrame there is no way to tell which
+        one owns the column, and a column shown against the wrong table is
+        worse than one that is missing.
+        """
+        if len(tables) == 1 and name and not name.startswith("_"):
+            self.columns.add(ColumnRef(next(iter(tables)), name))
+
     def _bind(self, target: ast.AST, value: frozenset[TableRef]) -> None:
         if isinstance(target, ast.Name):
             if value:
@@ -262,9 +272,17 @@ class _Environment:
         if isinstance(node, ast.Call):
             return self._call(node)
         if isinstance(node, ast.Attribute):
-            return self.evaluate(node.value)
+            # ``orders.customer_id`` outside a call is a column reference.
+            # Method names never reach here: ``_call`` consumes them.
+            base = self.evaluate(node.value)
+            self._note_column(base, node.attr)
+            return base
         if isinstance(node, ast.Subscript):
-            return self.evaluate(node.value)
+            base = self.evaluate(node.value)
+            key = _static_string(node.slice)
+            if key:
+                self._note_column(base, key)
+            return base
         if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
             out: set[TableRef] = set()
             for element in node.elts:
@@ -382,8 +400,8 @@ class _Environment:
 
     def absorb_sql(self, text: str, line: int) -> frozenset[TableRef]:
         """Run embedded SQL through the SQL extractor and keep its findings."""
-        joins, tables, errors = self.sql.analyze(
-            text, base_line=line, views={k: v for k, v in self.views.items()}
+        joins, tables, columns, errors = self.sql.analyze(
+            text, base_line=line, views=dict(self.views)
         )
         for join in joins:
             self.joins.append(
@@ -399,6 +417,7 @@ class _Environment:
                 )
             )
         self.tables.update(tables)
+        self.columns.update(columns)
         self.errors.extend(errors)
         return frozenset(tables)
 
@@ -493,7 +512,10 @@ class _Environment:
                 # Unqualified in a two-sided join: it could be either side, and
                 # without column-level schema knowledge we cannot say which.
                 return frozenset()
-            return _columns_for(bindings.get(qualifier, frozenset()), column.name)
+            resolved = _columns_for(bindings.get(qualifier, frozenset()), column.name)
+            if len(resolved) == 1:
+                self.columns.update(resolved)
+            return resolved
 
         return _group_conjuncts(_conjuncts(parsed), resolve)
 

@@ -17,14 +17,13 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from itertools import product
-from typing import NamedTuple
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.scope import Scope, build_scope
 
-from ..models import Join, JoinCondition, TableRef, column_expr
+from ..models import ColumnRef, Join, JoinCondition, TableRef, column_expr
 from ..naming import TableNormaliser
 
 #: A cheap pre-filter: text that cannot possibly contain a join is never parsed.
@@ -85,8 +84,8 @@ class SqlAnalyzer:
         *,
         base_line: int = 1,
         views: dict[str, frozenset[TableRef]] | None = None,
-    ) -> tuple[list[Join], set[TableRef], list[str]]:
-        """Return ``(joins, base_tables, errors)`` for a SQL script.
+    ) -> tuple[list[Join], set[TableRef], set[ColumnRef], list[str]]:
+        """Return ``(joins, base_tables, columns, errors)`` for a SQL script.
 
         ``views`` maps temp-view names registered elsewhere (typically by
         ``createOrReplaceTempView`` in PySpark) onto the base tables behind
@@ -94,6 +93,7 @@ class SqlAnalyzer:
         """
         joins: list[Join] = []
         tables: set[TableRef] = set()
+        columns: set[ColumnRef] = set()
         errors: list[str] = []
 
         # Commented-out SQL must never become an edge.  sqlglot already drops
@@ -116,6 +116,7 @@ class SqlAnalyzer:
             locator = _LineLocator(sql, base_line + offset)
             for scope in root.traverse():
                 tables.update(resolver.scope_tables(scope))
+                columns.update(_scope_columns(scope, resolver))
                 joins.extend(self._scope_joins(scope, resolver, locator))
             joins.extend(self._merge_joins(statement, resolver, locator))
 
@@ -123,12 +124,11 @@ class SqlAnalyzer:
         for join in joins:
             tables.add(join.left)
             tables.add(join.right)
-        return joins, tables, errors
+        return joins, tables, columns, errors
 
     def statement_tables(self, sql: str) -> set[TableRef]:
         """Base tables a statement reads from, used for DataFrame lineage."""
-        _, tables, _ = self.analyze(sql)
-        return tables
+        return self.analyze(sql)[1]
 
     # -- parsing ------------------------------------------------------------
 
@@ -350,18 +350,6 @@ class SqlAnalyzer:
 # ---------------------------------------------------------------------------
 # alias -> base table resolution
 # ---------------------------------------------------------------------------
-
-
-class ColumnRef(NamedTuple):
-    """A column of a physical table.
-
-    Carrying the *name* alongside the table is what makes a renamed CTE column
-    resolve properly: ``SELECT k AS j FROM b.t2`` referenced later as ``s.j``
-    has to come back as ``b.t2.k``, not ``b.t2.j``.
-    """
-
-    table: TableRef
-    name: str
 
 
 def _columns_for(tables: Iterable[TableRef], name: str) -> frozenset[ColumnRef]:
@@ -734,6 +722,20 @@ def _pair_key(left: TableRef, right: TableRef) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # AST helpers
 # ---------------------------------------------------------------------------
+
+
+def _scope_columns(scope: Scope, resolver: _Resolver) -> set[ColumnRef]:
+    """Every column in this scope that resolves to exactly one base table.
+
+    Ambiguous references are dropped rather than attributed to every candidate:
+    a column shown against the wrong table is worse than one that is missing.
+    """
+    found: set[ColumnRef] = set()
+    for column in scope.columns:
+        resolved = resolver.resolve_column(scope, column)
+        if len(resolved) == 1:
+            found.add(next(iter(resolved)))
+    return found
 
 
 def _branch_scopes(scope: Scope) -> list[Scope]:

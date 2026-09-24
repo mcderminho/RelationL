@@ -205,8 +205,12 @@ A scan writes a SQLite database. The two tables you probably want:
 **`nodes`** — one row per table per source, with `file_count` (how many files it
 appears in), `join_count`, `degree` and the source it came from.
 
-**`edges`** — one row per distinct (table pair, join type, condition), with
+**`edges`** - one row per distinct (table pair, join type, condition), with
 `occurrence_count` and `file_count`.
+
+**`columns`** - the columns each table is referenced by, flagged `is_join_key`
+when a join predicate keys on them. These are the columns the *code* uses, not
+a schema read from a warehouse.
 
 Plus `occurrences` (every code site, with line number), `edge_conditions` (the
 predicates broken out individually), `files`, `repos`, `scans` and
@@ -264,6 +268,10 @@ Scans are built to run over large repositories repeatedly:
 relationl serve --port 8000
 ```
 
+Two views of the same scan, switched from the header.
+
+### Graph
+
 A force-directed view of the graph, sized by how often each table is joined.
 Select two tables to get the shortest join path between them, with the full
 condition at every hop. The occurrence-count filter is the main control: raise
@@ -273,11 +281,32 @@ relies on, and **Confident only** hides the candidate joins described above.
 Solid edges are joins; dashed edges are candidates. Tables left with no join at
 the current threshold are hidden, and counted underneath the filter.
 
+### Model
+
+A semantic-model view in the style of a modelling tool: every table is a card
+listing its columns, join keys first and marked, and every distinct join is an
+arrow drawn between the specific columns it keys on.
+
+**A join on several columns is one relationship, not several lines.** The arrow
+runs as a single trunk between the two tables and fans out at each end to every
+column in the condition, so a composite key reads as one relationship on two
+columns. Hovering lights up the columns at both ends; clicking opens the same
+detail panel as the graph, with the condition, every code site and the branch
+and commit each came from.
+
+Cards can be dragged, and both views share the filters and the detail panel.
+
+> **No cardinality is shown.** A modelling tool reads a schema and can mark a
+> relationship 1:1 or 1:*. RelationL reads code, so it has no basis for that
+> claim. The join type and how many times the join was written are shown
+> instead, which is what the code actually tells us.
+
 The filters and the current path query live in the URL, so a route you have
 found can be pasted into a ticket and reopened exactly as it was:
 
 ```
 http://127.0.0.1:8000/?from=sales.orders&to=crm.regions&min=2&confident=1
+http://127.0.0.1:8000/?view=model&min=2
 ```
 
 There is no build step and no CDN: it is plain CSS and ES modules served from
@@ -289,7 +318,9 @@ so it is safe to point at one a scheduled scan is rewriting.
 ## Limitations
 
 - **No schema knowledge.** RelationL reads code, not a catalog. Where a column
-  is ambiguous it says so (see `ambiguous` above) rather than guessing.
+  is ambiguous it says so (see `ambiguous` above) rather than guessing. The
+  model view therefore shows the columns the code references, not every column
+  a table has, and cannot show cardinality.
 - **Dynamic SQL** assembled at runtime is only partly recoverable; f-string
   interpolations are replaced with a neutral token so the surrounding SQL still
   parses.

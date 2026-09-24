@@ -51,7 +51,7 @@ class Extractor:
             return findings
 
         try:
-            joins, tables, errors = analyser.analyze(text)
+            joins, tables, columns, errors = analyser.analyze(text)
         except RecursionError:  # pragma: no cover - pathological input
             findings.errors.append("expression nesting too deep")
             return findings
@@ -61,5 +61,6 @@ class Extractor:
 
         findings.joins = joins
         findings.tables = tables
+        findings.columns = columns
         findings.errors = errors
         return findings

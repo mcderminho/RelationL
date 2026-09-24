@@ -59,6 +59,21 @@ def create_app(database: Database | str | Path) -> FastAPI:
             limit=limit,
         )
 
+    @app.get("/api/model")
+    def model(
+        source: str | None = None,
+        min_occurrences: int = Query(1, ge=1),
+        include_ambiguous: bool = True,
+        limit: int = Query(200, ge=1, le=MAX_NODES),
+    ) -> dict:
+        """Tables with their columns, and relationships keyed to those columns."""
+        return store.model(
+            source=source,
+            min_occurrences=min_occurrences,
+            include_ambiguous=include_ambiguous,
+            limit=limit,
+        )
+
     @app.get("/api/tables")
     def tables(
         search: str | None = None,

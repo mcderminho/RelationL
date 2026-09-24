@@ -37,7 +37,15 @@ USING staging.raw_customers s
     ON t.customer_id = s.customer_id
 WHEN MATCHED THEN UPDATE SET t.segment = s.segment;
 
--- 6. Commented-out code must never become an edge.  None of the joins below
+-- 6. A composite key.  The model view has to fan the relationship out to both
+--    columns rather than draw a single line.
+SELECT i.order_id
+FROM warehouse.fct_order_items i
+JOIN warehouse.dim_product p
+    ON i.product_id = p.product_id
+   AND i.region_id = p.region_id;
+
+-- 7. Commented-out code must never become an edge.  None of the joins below
 --    exist, and the scan must agree.
 -- SELECT 1
 -- FROM warehouse.dim_store s

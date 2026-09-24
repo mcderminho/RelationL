@@ -25,6 +25,8 @@ const api = {
   },
 };
 
+import { createModelView } from "./model.js";
+
 const el = (id) => document.getElementById(id);
 const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -42,6 +44,7 @@ const state = {
   pathTables: new Set(),
   routes: [],
   activeRoute: 0,
+  view: "graph",
 };
 
 /* ------------------------------------------------------------ simulation -- */
@@ -451,6 +454,10 @@ canvas.addEventListener(
 );
 
 el("refit").addEventListener("click", () => {
+  if (state.view === "model") {
+    modelView.fit();
+    return;
+  }
   userAdjusted = false;
   fit();
 });
@@ -518,6 +525,7 @@ function renderTableList(nodes) {
 function closeDetail() {
   state.selectedTable = null;
   state.selectedEdge = null;
+  modelView.setSelectedEdge(null);
   el("detail").hidden = true;
   el("layout").classList.remove("has-detail");
   renderTableList(state.nodes);
@@ -640,6 +648,7 @@ async function selectTable(key) {
 async function selectEdge(edgeId) {
   state.selectedEdge = edgeId;
   draw();
+  modelView.setSelectedEdge(edgeId);
 
   let data;
   try {
@@ -821,6 +830,60 @@ el("clear-path").addEventListener("click", () => {
   writeUrl();
 });
 
+/* ----------------------------------------------------------- view switch -- */
+
+const modelView = createModelView({
+  mount: el("model"),
+  onSelectEdge: (edgeId) => selectEdge(edgeId),
+  onSelectTable: (table) => selectTable(table),
+});
+
+let modelLoaded = false;
+
+function setView(name) {
+  state.view = name;
+  const isGraph = name === "graph";
+  el("view-graph").setAttribute("aria-pressed", String(isGraph));
+  el("view-model").setAttribute("aria-pressed", String(!isGraph));
+  el("graph").hidden = !isGraph;
+  el("model").hidden = isGraph;
+  document.querySelector(".legend").hidden = !isGraph;
+
+  if (isGraph) {
+    resize();
+  } else if (!modelLoaded) {
+    loadModel();
+  } else {
+    modelView.fit();
+  }
+  writeUrl();
+}
+
+async function loadModel() {
+  showState("loading");
+  try {
+    const data = await api.get("/api/model", {
+      source: state.source,
+      min_occurrences: state.minCount,
+      include_ambiguous: !state.confidentOnly,
+      limit: 200,
+    });
+    modelLoaded = true;
+    if (!data.tables.length) {
+      showState("empty");
+      return;
+    }
+    hideStates();
+    modelView.render(data);
+    modelView.setSelectedEdge(state.selectedEdge);
+  } catch (error) {
+    showState("error", error.message);
+  }
+}
+
+el("view-graph").addEventListener("click", () => setView("graph"));
+el("view-model").addEventListener("click", () => setView("model"));
+
 /* ------------------------------------------------------------- deep link -- */
 
 /* The URL carries the filters and the current path query, so a route between
@@ -831,6 +894,7 @@ function writeUrl() {
   if (state.source) params.set("source", state.source);
   if (state.minCount > 1) params.set("min", String(state.minCount));
   if (state.confidentOnly) params.set("confident", "1");
+  if (state.view !== "graph") params.set("view", state.view);
   const from = el("path-from").value.trim();
   const to = el("path-to").value.trim();
   if (from) params.set("from", from);
@@ -849,10 +913,22 @@ function readUrl() {
   el("confident").checked = state.confidentOnly;
   el("path-from").value = params.get("from") || "";
   el("path-to").value = params.get("to") || "";
+  state.view = params.get("view") === "model" ? "model" : "graph";
   return Boolean(params.get("from") && params.get("to"));
 }
 
 /* ----------------------------------------------------------------- load -- */
+
+/* Both views read the same filters, so invalidate the model whenever they
+ * change and reload it if it is the one on screen. */
+function refresh() {
+  modelLoaded = false;
+  if (state.view === "model") {
+    loadModel();
+  } else {
+    loadGraph();
+  }
+}
 
 async function loadGraph({ relayout = true } = {}) {
   if (relayout) showState("loading");
@@ -938,19 +1014,19 @@ el("min-count").addEventListener("input", (event) => {
 
 el("min-count").addEventListener("change", () => {
   writeUrl();
-  loadGraph();
+  refresh();
 });
 
 el("confident").addEventListener("change", (event) => {
   state.confidentOnly = event.target.checked;
   writeUrl();
-  loadGraph();
+  refresh();
 });
 
 el("source").addEventListener("change", (event) => {
   state.source = event.target.value;
   writeUrl();
-  loadGraph();
+  refresh();
 });
 
 /* Watch the stage, not the window: opening the detail panel narrows the canvas
@@ -971,8 +1047,11 @@ document.addEventListener("keydown", (event) => {
 });
 
 const hasPathQuery = readUrl();
+const startInModel = state.view === "model";
+state.view = "graph";
 loadSummary()
   .then(() => loadGraph())
   .then(() => {
     if (hasPathQuery) findPath();
+    if (startInModel) setView("model");
   });

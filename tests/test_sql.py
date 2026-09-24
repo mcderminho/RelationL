@@ -7,7 +7,7 @@ from conftest import conditions_for, edge_map
 
 
 def joins_of(analyzer, sql):
-    found, _, _ = analyzer.analyze(sql)
+    found, _, _, _ = analyzer.analyze(sql)
     return found
 
 
@@ -186,7 +186,7 @@ class TestLineage:
         assert all(j.ambiguous for j in found)
 
     def test_cte_name_is_never_a_table(self, sql):
-        _, tables, _ = sql.analyze(
+        _, tables, _, _ = sql.analyze(
             "WITH recent AS (SELECT id FROM sales.orders) "
             "SELECT 1 FROM recent r JOIN crm.customers c ON r.id = c.id"
         )
@@ -209,7 +209,7 @@ class TestRobustness:
         assert len(found) == 2
 
     def test_broken_statement_does_not_lose_the_others(self, sql):
-        found, _, _ = sql.analyze(
+        found, _, _, _ = sql.analyze(
             "THIS IS NOT SQL AT ALL (((;\n"
             "SELECT 1 FROM a.t1 x JOIN b.t2 y ON x.k = y.k;"
         )
@@ -235,7 +235,7 @@ class TestRobustness:
         assert found[0].condition == "a.t1.k = b.t2.k"
 
     def test_no_join_means_no_edges(self, sql):
-        found, tables, _ = sql.analyze("SELECT * FROM a.t1 WHERE x = 1")
+        found, tables, _, _ = sql.analyze("SELECT * FROM a.t1 WHERE x = 1")
         assert found == []
         assert {t.key for t in tables} == {"a.t1"}
 

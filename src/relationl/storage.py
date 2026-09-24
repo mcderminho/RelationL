@@ -81,6 +81,17 @@ CREATE TABLE IF NOT EXISTS nodes (
     UNIQUE (source_id, table_key)
 );
 
+-- Columns observed against a table in the code.  This is not a schema: it is
+-- what the codebase actually references, which is what the model view draws.
+CREATE TABLE IF NOT EXISTS columns (
+    id          INTEGER PRIMARY KEY,
+    node_id     INTEGER NOT NULL REFERENCES nodes (id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    is_join_key INTEGER NOT NULL DEFAULT 0,
+    ref_count   INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (node_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS node_files (
     node_id INTEGER NOT NULL REFERENCES nodes (id) ON DELETE CASCADE,
     file_id INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
@@ -148,6 +159,7 @@ CREATE INDEX IF NOT EXISTS idx_edges_ambiguous ON edges (ambiguous);
 CREATE INDEX IF NOT EXISTS idx_occ_edge        ON occurrences (edge_id);
 CREATE INDEX IF NOT EXISTS idx_occ_file        ON occurrences (file_id);
 CREATE INDEX IF NOT EXISTS idx_node_files_file ON node_files (file_id);
+CREATE INDEX IF NOT EXISTS idx_columns_node      ON columns (node_id);
 """
 
 #: Convenience views for anyone querying the database by hand.
@@ -165,6 +177,12 @@ FROM edges e
 JOIN sources s ON s.id = e.source_id
 JOIN nodes   l ON l.id = e.left_node_id
 JOIN nodes   r ON r.id = e.right_node_id;
+
+CREATE VIEW IF NOT EXISTS v_columns AS
+SELECT c.id, s.name AS source, n.table_key, c.name, c.is_join_key, c.ref_count
+FROM columns c
+JOIN nodes   n ON n.id = c.node_id
+JOIN sources s ON s.id = n.source_id;
 
 CREATE VIEW IF NOT EXISTS v_occurrences AS
 SELECT o.id, e.id AS edge_id, l.table_key AS left_table, r.table_key AS right_table,
@@ -303,6 +321,7 @@ class Database:
                 )
                 source_ids = self._reset_sources(connection, sources)
                 counts = self._insert_records(connection, records, source_ids, scan_id)
+                self._mark_join_keys(connection, list(source_ids.values()))
                 self._recount(connection, list(source_ids.values()))
                 self._finish_scan(connection, scan_id, counts, started_at)
                 connection.commit()
@@ -355,6 +374,11 @@ class Database:
             connection.execute(
                 "DELETE FROM node_files WHERE file_id IN "
                 "(SELECT id FROM files WHERE source_id IN (%s))" % placeholders,
+                values,
+            )
+            connection.execute(
+                "DELETE FROM columns WHERE node_id IN "
+                "(SELECT id FROM nodes WHERE source_id IN (%s))" % placeholders,
                 values,
             )
             for table in ("edges", "nodes", "files"):
@@ -426,6 +450,15 @@ class Database:
             seen_nodes: set[int] = set()
             for ref in findings.tables:
                 seen_nodes.add(node_id(source_id, ref))
+
+            for column in findings.columns:
+                owner = node_id(source_id, column.table)
+                seen_nodes.add(owner)
+                connection.execute(
+                    "INSERT INTO columns (node_id, name, ref_count) VALUES (?, ?, 1) "
+                    "ON CONFLICT (node_id, name) DO UPDATE SET ref_count = ref_count + 1",
+                    (owner, column.name),
+                )
 
             for join in findings.joins:
                 left_id = node_id(source_id, join.left)
@@ -501,6 +534,52 @@ class Database:
             ],
         )
         return edge_id
+
+    def _mark_join_keys(
+        self, connection: sqlite3.Connection, source_ids: Sequence[int]
+    ) -> None:
+        """Flag the columns that a join predicate actually keys on.
+
+        ``edge_conditions`` stores fully qualified names ("schema.table.column"),
+        and a table name may itself contain dots, so the split is done by
+        matching the known table keys rather than on the last dot.
+        """
+        if not source_ids:
+            return
+        placeholders = ",".join("?" for _ in source_ids)
+        values = tuple(source_ids)
+
+        nodes = {
+            (row["source_id"], row["table_key"]): row["id"]
+            for row in connection.execute(
+                "SELECT id, source_id, table_key FROM nodes WHERE source_id IN (%s)"
+                % placeholders,
+                values,
+            )
+        }
+        rows = connection.execute(
+            "SELECT e.source_id, ec.left_column, ec.right_column "
+            "FROM edge_conditions ec JOIN edges e ON e.id = ec.edge_id "
+            "WHERE e.source_id IN (%s)" % placeholders,
+            values,
+        ).fetchall()
+
+        keys: set[tuple[int, str]] = set()
+        for row in rows:
+            for qualified in (row["left_column"], row["right_column"]):
+                if not qualified:
+                    continue
+                table, _, column = qualified.rpartition(".")
+                node_id = nodes.get((row["source_id"], table))
+                if node_id is not None and column:
+                    keys.add((node_id, column))
+
+        connection.executemany(
+            "INSERT INTO columns (node_id, name, is_join_key, ref_count) "
+            "VALUES (?, ?, 1, 0) "
+            "ON CONFLICT (node_id, name) DO UPDATE SET is_join_key = 1",
+            sorted(keys),
+        )
 
     def _recount(self, connection: sqlite3.Connection, source_ids: Sequence[int]) -> None:
         """Roll up the counts the UI reads, in SQL rather than in Python."""

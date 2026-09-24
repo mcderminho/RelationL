@@ -64,6 +64,13 @@ normalised = stores.join(
     F.lower(stores.region_code) == F.lower(spark.table("warehouse.dim_region").region_code),
 )
 
+# The same composite-key join as store_region.sql, so the two spellings must
+# collapse onto one relationship carrying both column pairs.
+composite = items.join(
+    products,
+    (items.product_id == products.product_id) & (items.region_id == products.region_id),
+)
+
 # An earlier attempt, left in place.  It must not appear in the graph.
 # retired = orders.join(spark.table("staging.retired_lookup"), orders.id == 1)
 
