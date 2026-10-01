@@ -8,11 +8,9 @@ Two things keep the L consistent with the rest of the word:
 
 * it is the font's *real* L outline, not a redrawn one, so its stem weight,
   arm height and proportions are the typeface's own;
-* the fork is derived from that glyph's measured arm, and each prong is cut on
-  a vertical, so the prongs leave the arm exactly flush with it and end on a
-  common line. Angled prongs take the arm's *vertical* thickness rather than
-  its perpendicular thickness, which makes the junction seamless and is the
-  optical correction a type designer would apply anyway.
+* the fork is derived from that glyph's measured arm, and its three prongs
+  radiate from a single point at the arm's terminal as true strokes, so they
+  leave the letter at its own width and open cleanly from there.
 
 The text is converted to outlines, so the files carry no font dependency and
 render identically everywhere. Space Grotesk is under the SIL Open Font
@@ -25,6 +23,7 @@ Nothing reads this script at runtime, so it is safe to edit freely.
 
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -47,14 +46,12 @@ TRACKING = -0.012  # em, slightly tight: a wordmark should read as one object
 GAP = -0.012  # em between "Relation" and the L, so the L is the last letter
 
 #: The fork, as fractions of cap height.
-FOOT = 0.54  # how far the prongs run past the end of the L's arm
-SPREAD = 0.42  # how far the outer prongs rise and fall
-
-#: Prong weight, as a fraction of the arm's.  Lighter than the arm on purpose:
-#: three prongs at full arm weight overlap for most of their length and read as
-#: a solid arrowhead rather than a fork.  At this weight the three bands tile
-#: the arm's terminal exactly, then separate a fifth of the way along.
-PRONG = 0.78
+FOOT = 0.52  # how far the prongs run past the end of the L's arm
+SPREAD = 0.36  # how far the outer prongs rise and fall
+#: Prong weight, as a fraction of the arm's.  A little lighter, so the three
+#: prongs clear each other close to the junction: at full arm weight they
+#: overlap for most of their length and the fork fills in as a solid arrowhead.
+PRONG = 0.72
 
 PAD = 0.22  # margin around the lockup, as a fraction of cap height
 
@@ -124,35 +121,45 @@ def measure_ell(face: Face) -> dict[str, float]:
     }
 
 
+def _stroke(x0: float, y0: float, x1: float, y1: float, weight: float) -> str:
+    """A straight stroke of `weight`, as a filled rectangle with square ends."""
+    dx, dy = x1 - x0, y1 - y0
+    length = math.hypot(dx, dy) or 1.0
+    nx, ny = -dy / length * weight / 2, dx / length * weight / 2
+    return (
+        f"M {x0 + nx:g} {y0 + ny:g} L {x1 + nx:g} {y1 + ny:g} "
+        f"L {x1 - nx:g} {y1 - ny:g} L {x0 - nx:g} {y0 - ny:g} Z"
+    )
+
+
 def crows_foot(face: Face, baseline: float, left: float) -> tuple[str, float]:
-    """The fork, as a filled path in SVG units, flush with the L's arm.
+    """The fork, as a filled path in SVG units, growing out of the L's arm.
 
     ``left`` is where the L glyph starts, so the fork lands on its terminal.
+
+    Three prongs radiate from a single point at the centre of the arm's
+    terminal, each a true stroke: constant thickness measured perpendicular to
+    its own direction, and cut off square at the end.  Near the point they
+    overlap, so the fork leaves the arm at the arm's own width and opens from
+    there.
+
+    Both details matter.  Prongs whose start edges tiled the whole terminal, or
+    whose thickness was measured vertically, gave sheared slabs that filled in
+    as a solid arrowhead; this is what a fork actually looks like.
     """
     ell = measure_ell(face)
     start = left + ell["arm_right"] * face.scale
     top = baseline - ell["arm_top"] * face.scale
     bottom = baseline - ell["baseline"] * face.scale
-    thickness = bottom - top
 
+    centre = (top + bottom) / 2
+    weight = (bottom - top) * PRONG
     end = start + FOOT * CAP
     rise = SPREAD * CAP
-    weight = thickness * PRONG
 
-    # Three parallelograms with vertical ends.  Their start edges tile the
-    # arm's terminal (top band, centre band, bottom band) so the junction is
-    # seamless and full width; they then diverge, and the gaps between them
-    # open early because each band is lighter than the arm.  Cutting every tip
-    # on `end` is what stops the fork looking ragged.
-    centre = top + thickness / 2
-    bands = [
-        (top, top - rise),  # upper prong: starts flush with the arm's top
-        (centre - weight / 2, centre - weight / 2),  # middle: straight on
-        (bottom - weight, bottom + rise - weight),  # lower prong
-    ]
     prongs = [
-        f"M {start:g} {y0:g} L {end:g} {y1:g} L {end:g} {y1 + weight:g} L {start:g} {y0 + weight:g} Z"
-        for y0, y1 in bands
+        _stroke(start, centre, end, centre + offset, weight)
+        for offset in (-rise, 0.0, rise)
     ]
     return " ".join(prongs), end
 
@@ -169,7 +176,7 @@ def lockup(face: Face) -> tuple[str, str, float, float]:
     fork, tip = crows_foot(face, baseline, ell_left)
 
     width = tip + pad
-    height = baseline + SPREAD * CAP + pad  # the lowest prong drops below the baseline
+    height = baseline + SPREAD * CAP + pad  # the lower prong drops below the baseline
     return text, ell + " " + fork, width, height
 
 

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 134 134" width="134" height="134" role="img" aria-label="RelationL">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 130 130" width="130" height="130" role="img" aria-label="RelationL">
   <title>RelationL</title>
-  <g transform="translate(5.04 -0.00)">
-    <path fill="#e0a13c" d="M23.35 87.84V15.84H34.46V77.76H69.12V87.84Z M 69.12 77.76 L 108 47.52 L 108 55.3824 L 69.12 85.6224 Z M 69.12 78.8688 L 108 78.8688 L 108 86.7312 L 69.12 86.7312 Z M 69.12 79.9776 L 108 110.218 L 108 118.08 L 69.12 87.84 Z"/>
+  <g transform="translate(3.60 -0.00)">
+    <path fill="#e0a13c" d="M23.35 87.84V15.84H34.46V77.76H69.12V87.84Z M 71.1855 85.7836 L 108.626 59.8636 L 104.494 53.8964 L 67.0545 79.8164 Z M 69.12 86.4288 L 106.56 86.4288 L 106.56 79.1712 L 69.12 79.1712 Z M 67.0545 85.7836 L 104.494 111.704 L 108.626 105.736 L 71.1855 79.8164 Z"/>
   </g>
 </svg>
